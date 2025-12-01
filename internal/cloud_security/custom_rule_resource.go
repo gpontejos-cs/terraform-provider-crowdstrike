@@ -71,6 +71,9 @@ type cloudSecurityCustomRuleResourceModel struct {
 	ResourceType    types.String `tfsdk:"resource_type"`
 	Severity        types.String `tfsdk:"severity"`
 	Subdomain       types.String `tfsdk:"subdomain"`
+	Labels          types.Set    `tfsdk:"labels"`
+	Category        types.String `tfsdk:"category"`
+	// Compliance      types.String `tfsdk:"compliance"`
 }
 
 func (r *cloudSecurityCustomRuleResource) Configure(
@@ -205,9 +208,21 @@ func (r *cloudSecurityCustomRuleResource) Schema(
 			},
 			"cloud_platform": schema.StringAttribute{
 				Computed:    true,
+				Optional:    true,
 				Description: "Cloud platform for the policy rule.",
+				Validators: []validator.String{
+					stringvalidator.OneOf(
+						"AWS",
+						"Azure",
+						"GCP",
+						"Terraform",
+						"CloudFormation",
+						"Pulumi",
+					),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"cloud_provider": schema.StringAttribute{
@@ -252,9 +267,28 @@ func (r *cloudSecurityCustomRuleResource) Schema(
 				},
 			},
 			"subdomain": schema.StringAttribute{
+				Optional:    true,
 				Computed:    true,
 				Description: "Subdomain for the policy rule.",
 				Default:     stringdefault.StaticString("IOM"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("IOM", "IAC"),
+				},
+			},
+			"labels": schema.SetAttribute{
+				Optional:            true,
+				MarkdownDescription: "Labels TBD",
+				ElementType:         types.StringType,
+			},
+			// "compliance": schema.StringAttribute{
+			// 	Optional:    true,
+			// 	Description: "compliance TBD",
+			// },
+			"category": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "compliance TBD",
+				Default:     stringdefault.StaticString(""),
 			},
 		},
 	}
@@ -270,8 +304,6 @@ func (r *cloudSecurityCustomRuleResource) Create(
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	plan.CloudPlatform = plan.CloudProvider
 
 	rule, diags := r.createCloudPolicyRule(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -459,6 +491,9 @@ func (m *cloudSecurityCustomRuleResourceModel) wrap(
 	m.CloudProvider = types.StringPointerValue(rule.Provider)
 	m.RemediationInfo = convertAlertRemediationInfoToTerraformState(rule.Remediation)
 	m.AlertInfo = convertAlertRemediationInfoToTerraformState(rule.AlertInfo)
+	m.Category = types.StringValue(rule.Category)
+	// labels := types.SetValueFrom(ctx, types.StringType, rule.)
+	// m.Labels = labels
 
 	if rule.Severity != nil {
 		m.Severity = types.StringValue(int32ToSeverity[int32(*rule.Severity)])
@@ -523,6 +558,12 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 	var newRule *models.ApimodelsRule
 	isDuplicateRule := !plan.ParentRuleId.IsNull()
 
+	var labels []string
+	diags = plan.Labels.ElementsAs(ctx, &labels, false)
+	if diags.HasError() {
+		return nil, diags
+	}
+
 	body := &models.CommonCreateRuleRequest{
 		Description:  plan.Description.ValueStringPointer(),
 		Name:         plan.Name.ValueStringPointer(),
@@ -531,6 +572,8 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 		ResourceType: plan.ResourceType.ValueStringPointer(),
 		Domain:       plan.Domain.ValueStringPointer(),
 		Subdomain:    plan.Subdomain.ValueStringPointer(),
+		Category:     plan.Category.ValueString(),
+		Labels:       labels,
 	}
 
 	if isDuplicateRule {
@@ -577,7 +620,6 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 		}
 	}
 
-	body.AlertInfo, diags = convertAlertInfoToAPIFormat(ctx, plan.AlertInfo, isDuplicateRule)
 	if diags.HasError() {
 		return nil, diags
 	}
@@ -604,14 +646,14 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 
 	body.Severity = severityToInt64[plan.Severity.ValueString()]
 
-	params := cloud_policies.CreateRuleMixin0Params{
+	params := cloud_policies.CreateRuleParams{
 		Context: ctx,
 		Body:    body,
 	}
 
-	resp, err := r.client.CloudPolicies.CreateRuleMixin0(&params)
+	resp, err := r.client.CloudPolicies.CreateRule(&params)
 	if err != nil {
-		if badRequest, ok := err.(*cloud_policies.CreateRuleMixin0BadRequest); ok {
+		if badRequest, ok := err.(*cloud_policies.CreateRuleBadRequest); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (400): %+v", *badRequest.Payload.Errors[0].Message),
@@ -619,7 +661,7 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 			return nil, diags
 		}
 
-		if ruleConflict, ok := err.(*cloud_policies.CreateRuleMixin0Conflict); ok {
+		if ruleConflict, ok := err.(*cloud_policies.CreateRuleConflict); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (409): %+v", *ruleConflict.Payload.Errors[0].Message),
@@ -627,7 +669,7 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 			return nil, diags
 		}
 
-		if internalServerError, ok := err.(*cloud_policies.CreateRuleMixin0InternalServerError); ok {
+		if internalServerError, ok := err.(*cloud_policies.CreateRuleInternalServerError); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (500): %+v", *internalServerError.Payload.Errors[0].Message),
@@ -751,6 +793,7 @@ func (r *cloudSecurityCustomRuleResource) updateCloudPolicyRule(ctx context.Cont
 		Name:        plan.Name.ValueString(),
 		UUID:        plan.ID.ValueStringPointer(),
 		Severity:    severityToInt64[plan.Severity.ValueString()],
+		Category:    plan.Category.ValueString(),
 	}
 
 	if isDuplicaterule {
@@ -890,14 +933,14 @@ func (r *cloudSecurityCustomRuleResource) updateCloudPolicyRule(ctx context.Cont
 func (r *cloudSecurityCustomRuleResource) deleteCloudPolicyRule(ctx context.Context, id string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	params := cloud_policies.DeleteRuleMixin0Params{
+	params := cloud_policies.DeleteRuleParams{
 		Context: ctx,
 		Ids:     []string{id},
 	}
 
-	_, err := r.client.CloudPolicies.DeleteRuleMixin0(&params)
+	_, err := r.client.CloudPolicies.DeleteRule(&params)
 	if err != nil {
-		if _, ok := err.(*cloud_policies.DeleteRuleMixin0NotFound); ok {
+		if _, ok := err.(*cloud_policies.DeleteRuleNotFound); ok {
 			return diags
 		}
 		diags.AddError(
