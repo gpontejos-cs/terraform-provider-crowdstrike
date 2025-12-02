@@ -604,14 +604,14 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 
 	body.Severity = severityToInt64[plan.Severity.ValueString()]
 
-	params := cloud_policies.CreateRuleMixin0Params{
+	params := cloud_policies.CreateRuleParams{
 		Context: ctx,
 		Body:    body,
 	}
 
-	resp, err := r.client.CloudPolicies.CreateRuleMixin0(&params)
+	resp, err := r.client.CloudPolicies.CreateRule(&params)
 	if err != nil {
-		if badRequest, ok := err.(*cloud_policies.CreateRuleMixin0BadRequest); ok {
+		if badRequest, ok := err.(*cloud_policies.CreateRuleBadRequest); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (400): %+v", *badRequest.Payload.Errors[0].Message),
@@ -619,7 +619,7 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 			return nil, diags
 		}
 
-		if ruleConflict, ok := err.(*cloud_policies.CreateRuleMixin0Conflict); ok {
+		if ruleConflict, ok := err.(*cloud_policies.CreateRuleConflict); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (409): %+v", *ruleConflict.Payload.Errors[0].Message),
@@ -627,7 +627,7 @@ func (r *cloudSecurityCustomRuleResource) createCloudPolicyRule(ctx context.Cont
 			return nil, diags
 		}
 
-		if internalServerError, ok := err.(*cloud_policies.CreateRuleMixin0InternalServerError); ok {
+		if internalServerError, ok := err.(*cloud_policies.CreateRuleInternalServerError); ok {
 			diags.AddError(
 				"Error Creating Rule",
 				fmt.Sprintf("Failed to create rule (500): %+v", *internalServerError.Payload.Errors[0].Message),
@@ -890,14 +890,14 @@ func (r *cloudSecurityCustomRuleResource) updateCloudPolicyRule(ctx context.Cont
 func (r *cloudSecurityCustomRuleResource) deleteCloudPolicyRule(ctx context.Context, id string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	params := cloud_policies.DeleteRuleMixin0Params{
+	params := cloud_policies.DeleteRuleParams{
 		Context: ctx,
 		Ids:     []string{id},
 	}
 
-	_, err := r.client.CloudPolicies.DeleteRuleMixin0(&params)
+	_, err := r.client.CloudPolicies.DeleteRule(&params)
 	if err != nil {
-		if _, ok := err.(*cloud_policies.DeleteRuleMixin0NotFound); ok {
+		if _, ok := err.(*cloud_policies.DeleteRuleNotFound); ok {
 			return diags
 		}
 		diags.AddError(
