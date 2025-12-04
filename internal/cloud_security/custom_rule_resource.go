@@ -272,7 +272,7 @@ func (r *cloudSecurityCustomRuleResource) Schema(
 				Description: "Subdomain for the policy rule.",
 				Default:     stringdefault.StaticString("IOM"),
 				Validators: []validator.String{
-					stringvalidator.OneOf("IOM", "IAC"),
+					stringvalidator.OneOf("IOM", "IAC", "KAC"),
 				},
 			},
 			"labels": schema.SetAttribute{
