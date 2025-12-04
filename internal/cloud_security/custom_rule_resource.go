@@ -385,7 +385,6 @@ func (r *cloudSecurityCustomRuleResource) ModifyPlan(
 		return
 	}
 
-	// this prevents these checks from running on resource creation
 	if req.State.Raw.IsNull() {
 		return
 	}

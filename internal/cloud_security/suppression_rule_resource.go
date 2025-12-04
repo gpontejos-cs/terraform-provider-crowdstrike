@@ -10,6 +10,9 @@ import (
 	"github.com/crowdstrike/gofalcon/falcon/client"
 	"github.com/crowdstrike/gofalcon/falcon/client/cloud_policies"
 	"github.com/crowdstrike/gofalcon/falcon/models"
+	"github.com/crowdstrike/terraform-provider-crowdstrike/internal/scopes"
+	"github.com/crowdstrike/terraform-provider-crowdstrike/internal/utils"
+	"github.com/go-openapi/strfmt"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -30,6 +33,13 @@ var (
 	_ resource.ResourceWithConfigure      = &cloudSecuritySuppressionRuleResource{}
 	_ resource.ResourceWithImportState    = &cloudSecuritySuppressionRuleResource{}
 	_ resource.ResourceWithValidateConfig = &cloudSecuritySuppressionRuleResource{}
+)
+
+var (
+	suppressionRuleResourceDocumentationSection string = "Falcon Cloud Security"
+	suppressionRuleResourceMarkdownDescription  string = "A suppression rule defines criteria for automatically suppressing findings, such as IOMs, across your environment. " +
+		"When a finding matches a suppression rule's conditions, such as specific rule types, asset tags, or cloud accounts, the finding will be suppressed."
+	suppressionRuleResourceRequiredScopes []scopes.Scope = cloudSecurityRuleScopes
 )
 
 func NewCloudSecuritySuppressionRuleResource() resource.Resource {
@@ -176,7 +186,10 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 	resp *resource.SchemaResponse,
 ) {
 	resp.Schema = schema.Schema{
-		Description: "Description of your resource",
+		MarkdownDescription: utils.MarkdownDescription(
+			suppressionRuleResourceDocumentationSection,
+			suppressionRuleResourceMarkdownDescription,
+			suppressionRuleResourceRequiredScopes),
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -193,14 +206,14 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				},
 			},
 			"description": schema.StringAttribute{
-				Description: "Description of the suppression rule",
+				Description: "Description of the suppression rule.",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
 			"domain": schema.StringAttribute{
-				Description: "Defines the Rule domain to which this suppression rule applies. Updating requires replacement.",
-				Required:    true,
+				MarkdownDescription: "Defines the Rule domain to which this suppression rule applies. Updating requires replacement. Only `CSPM` is currently supported",
+				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -210,8 +223,8 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				Required:    true,
 			},
 			"rule_selection_type": schema.StringAttribute{
-				Description: "One of: all_rules, rule_selection_filter",
-				Required:    true,
+				MarkdownDescription: "One of: `all_rules`, `rule_selection_filter`. Defines how Rules from the selected domain and subdomain are selected.",
+				Required:            true,
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						"all_rules",
@@ -220,8 +233,8 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				},
 			},
 			"scope_type": schema.StringAttribute{
-				Description: "Type of scope",
-				Required:    true,
+				MarkdownDescription: "Type of scope. One of: `all_assets`, `asset_filter`. Defines how assets are selected.",
+				Required:            true,
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						"all_assets",
@@ -230,14 +243,14 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				},
 			},
 			"subdomain": schema.StringAttribute{
-				Description: "Specifies the rule subdomain to which this suppression rule applies. Updating requires replacement.",
-				Required:    true,
+				MarkdownDescription: "Specifies the rule subdomain to which this suppression rule applies. Updating requires replacement. Only `IOM` is currently supported.",
+				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"suppression_comment": schema.StringAttribute{
-				Description: "Comment for suppression",
+				Description: "Comment for suppression. This will be attached to the Findings suppressed by this rule.",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
@@ -255,55 +268,67 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				},
 			},
 			"suppression_reason": schema.StringAttribute{
-				Description: "Reason for suppression",
+				Description: "Reason for suppression. One of: accept-risk, compensating-control, false-positive.",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(
+						"accept-risk",
+						"compensating-control",
+						"false-positive",
+					),
+				},
 			},
 		},
 		Blocks: map[string]schema.Block{
 			"rule_selection_filter": schema.SingleNestedBlock{
-				Description: "Filter criteria for rule selection",
+				MarkdownDescription: "Filter criteria for rule selection. Only necessary when `rule_selection_type` is `rule_selection_filter`.",
 				Attributes: map[string]schema.Attribute{
 					"rule_ids": schema.SetAttribute{
-						Description: "Set of rule IDs",
+						Description: "Set of rule IDs. A rule will match if its ID is included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"rule_names": schema.SetAttribute{
-						Description: "Set of rule names",
+						Description: "Set of rule names. A rule will match if its name is included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"rule_origins": schema.SetAttribute{
-						Description: "Set of rule origins",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of rule origins. One of: `Custom`, `Default`. A rule will match if its origin is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						Validators: []validator.Set{
+							setvalidator.ValueStringsAre(
+								stringvalidator.OneOf("Custom", "Default"),
+							),
+						},
 					},
 					"rule_providers": schema.SetAttribute{
-						Description: "Set of rule providers",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of rule cloud providers. Examples: `AWS`, `Azure`, `GCP`, `OCI`. A rule will match if its cloud provider is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"rule_services": schema.SetAttribute{
-						Description: "Set of rule services",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of cloud services. Examples: `Azure Cosmos DB`, `CloudFront`, `Compute Engine`, `EC2`, `Elasticache`, `Virtual Network`. A rule will match if its cloud service is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"rule_severities": schema.SetAttribute{
-						Description: "Set of rule severities",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of rule severities. One of: `critical`, `high`, `medium`, `informational`. A rule will match if its severity is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 						Validators: []validator.Set{
 							setvalidator.ValueStringsAre(
 								stringvalidator.OneOf("critical", "high", "medium", "informational"),
@@ -313,70 +338,78 @@ func (r *cloudSecuritySuppressionRuleResource) Schema(
 				},
 			},
 			"scope_asset_filter": schema.SingleNestedBlock{
-				Description: "Filter criteria for scope assets",
+				MarkdownDescription: "Filter criteria for scope assets. Only necessary when `scope_type` is `asset_filter`.",
 				Attributes: map[string]schema.Attribute{
 					"account_ids": schema.SetAttribute{
-						Description: "Set of account IDs",
+						Description: "Set of account IDs. An Asset will match if it belongs to an account included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"cloud_group_ids": schema.SetAttribute{
-						Description: "Set of cloud group IDs",
+						Description: "Set of cloud group IDs. An Asset will match if it belongs to a Cloud Group whose ID is included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"cloud_providers": schema.SetAttribute{
-						Description: "Set of cloud providers",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of cloud providers. Examples: `aws`, `azure`, `gcp`. An Asset will match if it belongs to a cloud provider included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"regions": schema.SetAttribute{
-						Description: "Set of regions",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of regions. Examples: `eu-central-1`, `eastus`, `us-west-1`. An Asset will match if it is located in a region included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"resource_ids": schema.SetAttribute{
-						Description: "Set of resource IDs",
+						Description: "Set of resource IDs. An Asset will match if its resource ID is included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"resource_names": schema.SetAttribute{
-						Description: "Set of resource names",
+						Description: "Set of resource names.  An Asset will match if its resource name is included in this set.",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"resource_types": schema.SetAttribute{
-						Description: "Set of resource types",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of resource types. Examples: `AWS::S3::Bucket`, `compute.googleapis.com/Instance`, `Microsoft.ContainerService/managedClusters`. An Asset will match if its resource type is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"service_categories": schema.SetAttribute{
-						Description: "Set of service categories",
-						ElementType: types.StringType,
-						Optional:    true,
-						Computed:    true,
-						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						MarkdownDescription: "Set of service categories. Examples: `Compute`, `Identity`, `Networking`.  An Asset will match if its cloud service category is included in this set.",
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 					},
 					"tags": schema.SetAttribute{
-						Description: "Set of tags",
+						Description: "Set of tags. These must match the k=v format. An Asset will match if at least one of its tags is included in this set. ",
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
 						Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+						Validators: []validator.Set{
+							setvalidator.ValueStringsAre(
+								stringvalidator.RegexMatches(
+									regexp.MustCompile(`^[^=]+=.+$`),
+									"must be in the format 'key=value'",
+								),
+							),
+						},
 					},
 				},
 			},
@@ -874,4 +907,42 @@ func createSuppressionrulesScopeAssetFilter(ctx context.Context, filter scopeAss
 	}
 
 	return &scopeAssetFilter, diags
+}
+
+func isTimestampExpired(timestampStr string) (bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	timestamp, err := time.Parse(time.RFC3339, timestampStr)
+	if err != nil {
+		diags.AddError(
+			"Error Parsing Timestamp",
+			fmt.Sprintf("Failed to parse timestamp: %+v", err),
+		)
+	}
+
+	return timestamp.Before(time.Now()), diags
+}
+
+func convertToRFC3339(timestamp string) (strfmt.DateTime, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	layouts := []string{
+		time.RFC3339,
+		"0001-01-01T00:00:00.000Z",
+	}
+
+	for _, layout := range layouts {
+		t, err := time.Parse(layout, timestamp)
+		if err == nil {
+
+			return strfmt.DateTime(t), nil
+		}
+	}
+
+	diags.AddError(
+		"Error Parsing Timestamp",
+		fmt.Sprintf("Error parsing timestamp: %s", timestamp),
+	)
+
+	return strfmt.DateTime{}, diags
 }
