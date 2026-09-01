@@ -503,8 +503,14 @@ func (m *cloudSecurityCustomRuleResourceModel) wrap(
 
 	controls := types.SetValueMust(types.ObjectType{AttrTypes: policyControl{}.AttributeTypes()}, []attr.Value{})
 	if len(rule.Controls) > 0 {
+		seen := make(map[string]bool)
 		var policyControls []policyControl
 		for _, control := range rule.Controls {
+			key := fmt.Sprintf("%s:%s", types.StringPointerValue(control.Authority), types.StringPointerValue(control.Code))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			policyControls = append(policyControls, policyControl{
 				Authority: types.StringPointerValue(control.Authority),
 				Code:      types.StringPointerValue(control.Code),

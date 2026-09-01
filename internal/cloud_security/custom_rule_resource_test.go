@@ -30,7 +30,6 @@ type ruleBaseConfig struct {
 	domain          string
 	severity        []string
 	remediationInfo [][]string
-	controls        []control
 	logic           []string
 	alertInfo       [][]string
 	attackTypes     [][]string
@@ -45,11 +44,6 @@ type ruleCustomConfig struct {
 	parentRule    dataRuleConfig
 }
 
-type control struct {
-	authority string
-	code      string
-}
-
 var commonConfig = ruleBaseConfig{
 	ruleNamePrefix: acctest.ResourcePrefix,
 	description: []string{
@@ -62,16 +56,6 @@ var commonConfig = ruleBaseConfig{
 	remediationInfo: [][]string{
 		{"This is the first step", "This is the second step"},
 		{"This is the first step", "This is the second step", "This is the third step."},
-	},
-	controls: []control{
-		{
-			authority: "CIS",
-			code:      "791",
-		},
-		{
-			authority: "CIS",
-			code:      "98",
-		},
 	},
 	logic: []string{
 		"package crowdstrike\ndefault result = \"pass\"\nresult = \"fail\" if {\n input.tags[_] == \"catch-me\"\n }",
@@ -416,8 +400,7 @@ func generateRuleCopyTests(config ruleCustomConfig, ruleName string) []resource.
 		remediationInfo := strings.Join([]string{
 			`"` + strings.Join(config.remediationInfo[i], `","`) + `"`,
 		}, "")
-		resourceStep := resource.TestStep{
-			Config: fmt.Sprintf(`
+		mainConfig := fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "rule_%s" {
   resource_type    = "%s"
   name             = "%s"
@@ -437,8 +420,10 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 }
 `, ruleName, config.resourceType, config.ruleNamePrefix+ruleName, config.description[i],
 				config.cloudProvider, config.severity[i], remediationInfo,
-				testGenerateControlBlock(config.controls[i]), alertInfo,
-				config.parentRule.ruleName, config.parentRule.benchmark),
+				testCustomControlBlock(randomSuffix, i), alertInfo,
+				config.parentRule.ruleName, config.parentRule.benchmark)
+		resourceStep := resource.TestStep{
+			Config: testCustomFrameworkConfig(randomSuffix) + mainConfig,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr(resourceName, "subdomain", config.subdomain),
 				resource.TestCheckResourceAttr(resourceName, "domain", config.domain),
@@ -448,8 +433,8 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 				resource.TestCheckResourceAttr(resourceName, "cloud_platform", config.cloudPlatform),
 				resource.TestCheckResourceAttr(resourceName, "cloud_provider", config.cloudProvider),
 				resource.TestCheckResourceAttr(resourceName, "severity", config.severity[i]),
-				resource.TestCheckResourceAttr(resourceName, "controls.0.authority", config.ruleBaseConfig.controls[i].authority),
-				resource.TestCheckResourceAttr(resourceName, "controls.0.code", config.ruleBaseConfig.controls[i].code),
+				resource.TestCheckResourceAttr(resourceName, "controls.0.authority", "Custom"),
+				resource.TestCheckResourceAttrSet(resourceName, "controls.0.code"),
 				resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[i])-1), config.alertInfo[i][len(config.alertInfo[i])-1]),
 				resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[i])-1), config.remediationInfo[i][len(config.remediationInfo[i])-1]),
 				resource.TestCheckResourceAttrSet(resourceName, "id"),
@@ -495,8 +480,7 @@ func generateRuleLogicTests(config ruleCustomConfig, ruleName string) []resource
 		attackTypes := strings.Join([]string{
 			`"` + strings.Join(config.attackTypes[i], `","`) + `"`,
 		}, "")
-		resourceStep := resource.TestStep{
-			Config: fmt.Sprintf(`
+		mainConfig := fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "rule_%s" {
   resource_type    = "%s"
   name             = "%s"
@@ -515,7 +499,9 @@ EOF
 }
 `, ruleName, config.resourceType, config.ruleNamePrefix+ruleName, config.description[i],
 				config.cloudProvider, config.severity[i], remediationInfo, config.logic[i],
-				alertInfo, testGenerateControlBlock(config.controls[i]), attackTypes),
+				alertInfo, testCustomControlBlock(randomSuffix, i), attackTypes)
+		resourceStep := resource.TestStep{
+			Config: testCustomFrameworkConfig(randomSuffix) + mainConfig,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr(resourceName, "subdomain", config.subdomain),
 				resource.TestCheckResourceAttr(resourceName, "domain", config.domain),
@@ -526,8 +512,8 @@ EOF
 				resource.TestCheckResourceAttr(resourceName, "cloud_provider", config.cloudProvider),
 				resource.TestCheckResourceAttr(resourceName, "severity", config.severity[i]),
 				resource.TestCheckResourceAttr(resourceName, "logic", config.logic[i]+"\n"),
-				resource.TestCheckResourceAttr(resourceName, "controls.0.authority", config.ruleBaseConfig.controls[i].authority),
-				resource.TestCheckResourceAttr(resourceName, "controls.0.code", config.ruleBaseConfig.controls[i].code),
+				resource.TestCheckResourceAttr(resourceName, "controls.0.authority", "Custom"),
+				resource.TestCheckResourceAttrSet(resourceName, "controls.0.code"),
 				resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[i])-1), config.alertInfo[i][len(config.alertInfo[i])-1]),
 				resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[i])-1), config.remediationInfo[i][len(config.remediationInfo[i])-1]),
 				resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("attack_types.%d", len(config.attackTypes[i])-1), config.attackTypes[i][len(config.attackTypes[i])-1]),
@@ -673,7 +659,7 @@ func generateRuleCopyDefinedToOmittedTests(config ruleCustomConfig, ruleName str
 	}, "")
 
 	definedStep := resource.TestStep{
-		Config: fmt.Sprintf(`
+		Config: testCustomFrameworkConfig(randomSuffix) + fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "rule_%s_definedToOmitted" {
   resource_type    = "%s"
   name             = "%s"
@@ -693,7 +679,7 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 }
 `, ruleName, config.resourceType, config.ruleNamePrefix+ruleName, config.description[0],
 			config.cloudProvider, config.severity[0], remediationInfo,
-			testGenerateControlBlock(config.controls[0]), alertInfo,
+			testCustomControlBlock(randomSuffix, 0), alertInfo,
 			config.parentRule.ruleName, config.parentRule.benchmark),
 		Check: resource.ComposeAggregateTestCheckFunc(
 			resource.TestCheckResourceAttr(resourceName, "subdomain", config.subdomain),
@@ -704,8 +690,8 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 			resource.TestCheckResourceAttr(resourceName, "cloud_platform", config.cloudPlatform),
 			resource.TestCheckResourceAttr(resourceName, "cloud_provider", config.cloudProvider),
 			resource.TestCheckResourceAttr(resourceName, "severity", config.severity[0]),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", config.ruleBaseConfig.controls[0].authority),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.code", config.ruleBaseConfig.controls[0].code),
+			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", "Custom"),
+			resource.TestCheckResourceAttrSet(resourceName, "controls.0.code"),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[0])-1), config.alertInfo[0][len(config.alertInfo[0])-1]),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[0])-1), config.remediationInfo[0][len(config.remediationInfo[0])-1]),
 			resource.TestCheckResourceAttrSet(resourceName, "id"),
@@ -767,7 +753,7 @@ func generateRuleCopyDefinedToEmptyTests(config ruleCustomConfig) []resource.Tes
 	}, "")
 
 	definedStep := resource.TestStep{
-		Config: fmt.Sprintf(`
+		Config: testCustomFrameworkConfig(resourceName) + fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "%s" {
   resource_type    = "%s"
   name             = "%s"
@@ -787,7 +773,7 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 }
 `, resourceName, config.resourceType, config.ruleNamePrefix+resourceName, config.description[0],
 			config.cloudProvider, config.severity[0], remediationInfo,
-			testGenerateControlBlock(config.controls[0]), alertInfo,
+			testCustomControlBlock(resourceName, 0), alertInfo,
 			config.parentRule.ruleName, config.parentRule.benchmark),
 		Check: resource.ComposeAggregateTestCheckFunc(
 			resource.TestCheckResourceAttr(fullResourceName, "subdomain", config.subdomain),
@@ -798,8 +784,8 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 			resource.TestCheckResourceAttr(fullResourceName, "cloud_platform", config.cloudPlatform),
 			resource.TestCheckResourceAttr(fullResourceName, "cloud_provider", config.cloudProvider),
 			resource.TestCheckResourceAttr(fullResourceName, "severity", config.severity[0]),
-			resource.TestCheckResourceAttr(fullResourceName, "controls.0.authority", config.ruleBaseConfig.controls[0].authority),
-			resource.TestCheckResourceAttr(fullResourceName, "controls.0.code", config.ruleBaseConfig.controls[0].code),
+			resource.TestCheckResourceAttr(fullResourceName, "controls.0.authority", "Custom"),
+			resource.TestCheckResourceAttrSet(fullResourceName, "controls.0.code"),
 			resource.TestCheckResourceAttr(fullResourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[0])-1), config.alertInfo[0][len(config.alertInfo[0])-1]),
 			resource.TestCheckResourceAttr(fullResourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[0])-1), config.remediationInfo[0][len(config.remediationInfo[0])-1]),
 			resource.TestCheckResourceAttrSet(fullResourceName, "id"),
@@ -820,10 +806,10 @@ resource "crowdstrike_cloud_security_custom_rule" "%s" {
 }
 
 data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
-  rule_name = "%[9]s"
+  rule_name = "%[8]s"
 }
 `, resourceName, config.resourceType, config.ruleNamePrefix+resourceName, config.description[0],
-			config.cloudProvider, config.severity[0], testGenerateControlBlock(config.controls[0]),
+			config.cloudProvider, config.severity[0],
 			remediationInfo, config.parentRule.ruleName, config.parentRule.benchmark),
 		Check: resource.ComposeAggregateTestCheckFunc(
 			resource.TestCheckResourceAttr(fullResourceName, "subdomain", config.subdomain),
@@ -866,7 +852,7 @@ func generateRuleRegoDefinedToOmittedTests(config ruleCustomConfig, ruleName str
 	}, "")
 
 	definedStep := resource.TestStep{
-		Config: fmt.Sprintf(`
+		Config: testCustomFrameworkConfig(randomSuffix) + fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "rule_%s_definedToOmitted" {
   resource_type    = "%s"
   name             = "%s"
@@ -884,7 +870,7 @@ EOF
 }
 `, ruleName, config.resourceType, config.ruleNamePrefix+ruleName, config.description[0],
 			config.cloudProvider, config.severity[0], remediationInfo,
-			testGenerateControlBlock(config.controls[0]), alertInfo, config.logic[0]),
+			testCustomControlBlock(randomSuffix, 0), alertInfo, config.logic[0]),
 		Check: resource.ComposeAggregateTestCheckFunc(
 			resource.TestCheckResourceAttr(resourceName, "subdomain", config.subdomain),
 			resource.TestCheckResourceAttr(resourceName, "domain", config.domain),
@@ -895,8 +881,8 @@ EOF
 			resource.TestCheckResourceAttr(resourceName, "cloud_provider", config.cloudProvider),
 			resource.TestCheckResourceAttr(resourceName, "severity", config.severity[0]),
 			resource.TestCheckResourceAttr(resourceName, "logic", config.logic[0]+"\n"),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", config.ruleBaseConfig.controls[0].authority),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.code", config.ruleBaseConfig.controls[0].code),
+			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", "Custom"),
+			resource.TestCheckResourceAttrSet(resourceName, "controls.0.code"),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[0])-1), config.alertInfo[0][len(config.alertInfo[0])-1]),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[0])-1), config.remediationInfo[0][len(config.remediationInfo[0])-1]),
 			resource.TestCheckResourceAttrSet(resourceName, "id"),
@@ -955,7 +941,7 @@ func generateRuleRegoDefinedToEmptyTests(config ruleCustomConfig, ruleName strin
 	}, "")
 
 	definedStep := resource.TestStep{
-		Config: fmt.Sprintf(`
+		Config: testCustomFrameworkConfig(randomSuffix) + fmt.Sprintf(`
 resource "crowdstrike_cloud_security_custom_rule" "rule_%s_definedToEmpty" {
   resource_type    = "%s"
   name             = "%s"
@@ -973,7 +959,7 @@ EOF
 }
 `, ruleName, config.resourceType, config.ruleNamePrefix+ruleName, config.description[0],
 			config.cloudProvider, config.severity[0], remediationInfo,
-			testGenerateControlBlock(config.controls[0]), alertInfo, config.logic[0]),
+			testCustomControlBlock(randomSuffix, 0), alertInfo, config.logic[0]),
 		Check: resource.ComposeAggregateTestCheckFunc(
 			resource.TestCheckResourceAttr(resourceName, "subdomain", config.subdomain),
 			resource.TestCheckResourceAttr(resourceName, "domain", config.domain),
@@ -984,8 +970,8 @@ EOF
 			resource.TestCheckResourceAttr(resourceName, "cloud_provider", config.cloudProvider),
 			resource.TestCheckResourceAttr(resourceName, "severity", config.severity[0]),
 			resource.TestCheckResourceAttr(resourceName, "logic", config.logic[0]+"\n"),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", config.ruleBaseConfig.controls[0].authority),
-			resource.TestCheckResourceAttr(resourceName, "controls.0.code", config.ruleBaseConfig.controls[0].code),
+			resource.TestCheckResourceAttr(resourceName, "controls.0.authority", "Custom"),
+			resource.TestCheckResourceAttrSet(resourceName, "controls.0.code"),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("alert_info.%d", len(config.alertInfo[0])-1), config.alertInfo[0][len(config.alertInfo[0])-1]),
 			resource.TestCheckResourceAttr(resourceName, fmt.Sprintf("remediation_info.%d", len(config.remediationInfo[0])-1), config.remediationInfo[0][len(config.remediationInfo[0])-1]),
 			resource.TestCheckResourceAttrSet(resourceName, "id"),
@@ -1053,7 +1039,10 @@ resource "crowdstrike_cloud_security_custom_rule" "%s" {
   severity         = "%s"
   remediation_info = [%s]
   controls = [
-    %s
+    {
+      authority = "Custom"
+      code      = "test-code"
+    }
   ]
   alert_info     = [%s]
   attack_types   = ["test"]
@@ -1065,8 +1054,7 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 }
 `, resourceName, config.resourceType, config.ruleNamePrefix+resourceName, config.description[0],
 				config.cloudProvider, config.severity[0], remediationInfo,
-				testGenerateControlBlock(config.controls[0]), alertInfo,
-				config.parentRule.ruleName, config.parentRule.benchmark),
+				alertInfo, config.parentRule.ruleName, config.parentRule.benchmark),
 			ExpectError: regexp.MustCompile(
 				"Invalid Attribute Combination",
 			),
@@ -1075,13 +1063,51 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 	}
 }
 
-func testGenerateControlBlock(c control) string {
+// testCustomFrameworkConfig generates a custom compliance framework with two controls
+// and a data source to query them, keyed by a unique suffix.
+func testCustomFrameworkConfig(suffix string) string {
+	return fmt.Sprintf(`
+resource "crowdstrike_cloud_compliance_custom_framework" "fw_%[1]s" {
+  name        = "tfacc-fw-%[1]s"
+  description = "Test framework for acceptance tests"
+  sections = {
+    "section-1" = {
+      name = "Section 1"
+      controls = {
+        "control-1" = {
+          name        = "Control 1 %[1]s"
+          description = "First test control"
+          rules       = []
+        }
+        "control-2" = {
+          name        = "Control 2 %[1]s"
+          description = "Second test control"
+          rules       = []
+        }
+      }
+    }
+  }
+  lifecycle {
+    ignore_changes = [sections]
+  }
+}
+
+data "crowdstrike_cloud_compliance_framework_controls" "fw_%[1]s" {
+  fql = "compliance_control_authority:'Custom'+compliance_control_benchmark_name:'${crowdstrike_cloud_compliance_custom_framework.fw_%[1]s.name}'"
+}
+`, suffix)
+}
+
+// testCustomControlBlock generates a controls block referencing a dynamically created
+// custom framework control. stepIndex 0 uses "Control 1", stepIndex 1 uses "Control 2".
+func testCustomControlBlock(suffix string, stepIndex int) string {
+	controlName := fmt.Sprintf("Control %d %s", stepIndex+1, suffix)
 	return fmt.Sprintf(`
     {
-		authority = "%s"
-		code = "%s"
-	}
-	`, c.authority, c.code)
+      authority = "Custom"
+      code      = one([for c in data.crowdstrike_cloud_compliance_framework_controls.fw_%[1]s.controls : c.code if c.name == "%[2]s"])
+    }
+    `, suffix, controlName)
 }
 
 // Test inheritance cycle: inherit from parent -> set to empty -> inherit from parent again.
