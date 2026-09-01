@@ -2,7 +2,6 @@ package cloudsecurity_test
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,100 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
-
-// skipIfRegoNotEnabled skips the test if the ENABLE_REGO_TESTS environment variable is not set.
-// This is used for tests that use custom Rego logic, which requires the custom policy feature
-// flag to be enabled in the CrowdStrike environment.
-// To enable these tests, set: export ENABLE_REGO_TESTS=1.
-func skipIfRegoNotEnabled(t *testing.T) {
-	if os.Getenv("ENABLE_REGO_TESTS") == "" {
-		t.Skip("Skipping test: ENABLE_REGO_TESTS environment variable not set. These tests require the custom policy feature flag to be enabled for your CID.")
-	}
-}
-
-type ruleBaseConfig struct {
-	ruleNamePrefix  string
-	description     []string
-	subdomain       string
-	domain          string
-	severity        []string
-	remediationInfo [][]string
-	logic           []string
-	alertInfo       [][]string
-	attackTypes     [][]string
-}
-
-type ruleCustomConfig struct {
-	ruleBaseConfig
-	parentId      string
-	cloudProvider string
-	cloudPlatform string
-	resourceType  string
-	parentRule    dataRuleConfig
-}
-
-var commonConfig = ruleBaseConfig{
-	ruleNamePrefix: acctest.ResourcePrefix,
-	description: []string{
-		"This is a description",
-		"This is an updated description",
-	},
-	subdomain: "IOM",
-	domain:    "CSPM",
-	severity:  []string{"critical", "informational"},
-	remediationInfo: [][]string{
-		{"This is the first step", "This is the second step"},
-		{"This is the first step", "This is the second step", "This is the third step."},
-	},
-	logic: []string{
-		"package crowdstrike\ndefault result = \"pass\"\nresult = \"fail\" if {\n input.tags[_] == \"catch-me\"\n }",
-		"package crowdstrike\ndefault result = \"pass\"\nresult = \"fail\" if {\n input.tags[_] == \"catch-me-again\"\n }",
-	},
-	alertInfo: [][]string{
-		{
-			"List all Auto Scaling Groups in the account.",
-			"Check if multiple instance types are included in the configuration.",
-			"Check if multiple availability zones are configured.",
-		},
-		{
-			"Check if multiple instance types are included in the configuration.",
-			"List all Auto Scaling Groups in the account.",
-			"Check if multiple availability zones are configured.",
-			"Alert when any of the above conditions are met.",
-		},
-	},
-	attackTypes: [][]string{
-		{"Look it's an attack type"},
-		{"Look it's an attack type", "This is a second attack type"},
-	},
-}
-
-var awsCopyConfig = ruleCustomConfig{
-	ruleBaseConfig: commonConfig,
-	parentId:       "0473a26b-7f29-43c7-9581-105f8c9c0b7d",
-	cloudProvider:  "AWS",
-	cloudPlatform:  "AWS",
-	resourceType:   "AWS::EC2::Instance",
-	parentRule:     awsConfig,
-}
-
-var azureCopyConfig = ruleCustomConfig{
-	ruleBaseConfig: commonConfig,
-	parentId:       "1c9516e9-490b-461c-8644-9239ff3cf0d3",
-	cloudProvider:  "Azure",
-	cloudPlatform:  "Azure",
-	resourceType:   "Microsoft.Compute/virtualMachines",
-	parentRule:     azureConfig,
-}
-
-var gcpCopyConfig = ruleCustomConfig{
-	ruleBaseConfig: commonConfig,
-	parentId:       "0260ffa9-eb65-42f4-a02a-7456d280049a",
-	cloudProvider:  "GCP",
-	cloudPlatform:  "GCP",
-	resourceType:   "sqladmin.googleapis.com/Instance",
-	parentRule:     gcpConfig,
-}
 
 // AWS Tests.
 func TestCloudSecurityCustomRuleResource_AWS_Copy(t *testing.T) {
@@ -1061,53 +966,6 @@ data "crowdstrike_cloud_security_rules" "rule_%[1]s" {
 			PlanOnly: true,
 		},
 	}
-}
-
-// testCustomFrameworkConfig generates a custom compliance framework with two controls
-// and a data source to query them, keyed by a unique suffix.
-func testCustomFrameworkConfig(suffix string) string {
-	return fmt.Sprintf(`
-resource "crowdstrike_cloud_compliance_custom_framework" "fw_%[1]s" {
-  name        = "tfacc-fw-%[1]s"
-  description = "Test framework for acceptance tests"
-  sections = {
-    "section-1" = {
-      name = "Section 1"
-      controls = {
-        "control-1" = {
-          name        = "Control 1 %[1]s"
-          description = "First test control"
-          rules       = []
-        }
-        "control-2" = {
-          name        = "Control 2 %[1]s"
-          description = "Second test control"
-          rules       = []
-        }
-      }
-    }
-  }
-  lifecycle {
-    ignore_changes = [sections]
-  }
-}
-
-data "crowdstrike_cloud_compliance_framework_controls" "fw_%[1]s" {
-  fql = "compliance_control_authority:'Custom'+compliance_control_benchmark_name:'${crowdstrike_cloud_compliance_custom_framework.fw_%[1]s.name}'"
-}
-`, suffix)
-}
-
-// testCustomControlBlock generates a controls block referencing a dynamically created
-// custom framework control. stepIndex 0 uses "Control 1", stepIndex 1 uses "Control 2".
-func testCustomControlBlock(suffix string, stepIndex int) string {
-	controlName := fmt.Sprintf("Control %d %s", stepIndex+1, suffix)
-	return fmt.Sprintf(`
-    {
-      authority = "Custom"
-      code      = one([for c in data.crowdstrike_cloud_compliance_framework_controls.fw_%[1]s.controls : c.code if c.name == "%[2]s"])
-    }
-    `, suffix, controlName)
 }
 
 // Test inheritance cycle: inherit from parent -> set to empty -> inherit from parent again.
